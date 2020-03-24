@@ -130,11 +130,6 @@ def ransac_vanishing_point(edgelets, num_ransac_iter=2000, threshold_inlier=5):
     best_model: ndarry of shape (3,)
         Best model for vanishing point estimated.
 
-    Reference
-    ---------
-    Chaudhury, Krishnendu, Stephen DiVerdi, and Sergey Ioffe.
-    "Auto-rectification of user photos." 2014 IEEE International Conference on
-    Image Processing (ICIP). IEEE, 2014.
     """
     locations, directions, strengths = edgelets
     lines = edgelet_lines(edgelets)
