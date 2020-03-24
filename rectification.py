@@ -51,23 +51,7 @@ def compute_votes(edgelets, model, threshold_inlier=5):
 
     Votes for edgelets which lie inside threshold are same as their strengths,
     otherwise zero.
-
-    Parameters
-    ----------
-    edgelets: tuple of ndarrays
-        (locations, directions, strengths) as computed by `compute_edgelets`.
-    model: ndarray of shape (3,)
-        Vanishing point model in homogenous cordinate system.
-    threshold_inlier: float
-        Threshold to be used for computing inliers in degrees. Angle between
-        edgelet direction and line connecting the  Vanishing point model and
-        edgelet location is used to threshold.
-
-    Returns
-    -------
-    votes: ndarry of shape (n_edgelets,)
-        Votes towards vanishing point model for each of the edgelet.
-
+    votes: ndarry of shape (n_edgelets,)  Votes towards vanishing point model for each of the edgelet.
     """
     vp = model[:2] / model[2]
 
