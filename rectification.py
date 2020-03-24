@@ -1,14 +1,3 @@
-"""Automated Rectification of Image.
-
-References
-----------
-1.  Chaudhury, Krishnendu, Stephen DiVerdi, and Sergey Ioffe.
-    "Auto-rectification of user photos." 2014 IEEE International Conference on
-    Image Processing (ICIP). IEEE, 2014.
-2.  Bazin, Jean-Charles, and Marc Pollefeys. "3-line RANSAC for orthogonal
-    vanishing point detection." 2012 IEEE/RSJ International Conference on
-    Intelligent Robots and Systems. IEEE, 2012.
-"""
 from skimage import feature, color, transform, io
 import numpy as np
 import logging
