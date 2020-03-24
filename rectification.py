@@ -5,25 +5,8 @@ import logging
 
 def compute_edgelets(image, sigma=3):
     """Create edgelets as in the paper.
-
     Uses canny edge detection and then finds (small) lines using probabilstic
     hough transform as edgelets.
-
-    Parameters
-    ----------
-    image: ndarray
-        Image for which edgelets are to be computed.
-    sigma: float
-        Smoothing to be used for canny edge detection.
-
-    Returns
-    -------
-    locations: ndarray of shape (n_edgelets, 2)
-        Locations of each of the edgelets.
-    directions: ndarray of shape (n_edgelets, 2)
-        Direction of the edge (tangent) at each of the edgelet.
-    strengths: ndarray of shape (n_edgelets,)
-        Length of the line segments detected for the edgelet.
     """
     gray_img = color.rgb2gray(image)
     edges = feature.canny(gray_img, sigma)
@@ -53,16 +36,6 @@ def compute_edgelets(image, sigma=3):
 
 def edgelet_lines(edgelets):
     """Compute lines in homogenous system for edglets.
-
-    Parameters
-    ----------
-    edgelets: tuple of ndarrays
-        (locations, directions, strengths) as computed by `compute_edgelets`.
-
-    Returns
-    -------
-    lines: ndarray of shape (n_edgelets, 3)
-        Lines at each of edgelet locations in homogenous system.
     """
     locations, directions, _ = edgelets
     normals = np.zeros_like(directions)
