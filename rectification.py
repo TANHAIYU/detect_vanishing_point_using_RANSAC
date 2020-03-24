@@ -467,28 +467,7 @@ def vis_model(image, model, show=True):
 
 def rectify_image(image, clip_factor=6, algorithm='independent', 
                   reestimate=False):
-    """Rectified image with vanishing point computed using ransac.
-
-    Parameters
-    ----------
-    image: ndarray
-        Image which has to be rectified.
-    clip_factor: float, optional
-        Proportion of image in multiples of image size to be retained if gone
-        out of bounds after homography.
-    algorithm: one of {'3-line', 'independent'}
-        independent ransac algorithm finds the orthogonal vanishing points by
-        applying ransac twice.
-        3-line algorithm finds the orthogonal vanishing points together, but
-        assumes knowledge of focal length.
-    reestimate: bool
-        If ransac results are to be reestimated using least squares with
-        inlers. Turn this off if getting bad results.
-    Returns
-    -------
-    warped_img: ndarray
-        Rectified image.
-    """
+    
     if type(image) is not np.ndarray:
         image = io.imread(image)
 
@@ -516,17 +495,13 @@ def rectify_image(image, clip_factor=6, algorithm='independent',
         raise KeyError(
             "Parameter 'algorithm' has to be one of {'3-line', 'independent'}")
 
-    # Compute the homography and warp
-    warped_img = compute_homography_and_warp(image, vp1, vp2,
-                                             clip_factor=clip_factor)
-
-    return warped_img
+    return vp1,vp2
 
 
 if __name__ == '__main__':
     import sys
     image_name = sys.argv[-1]
     image = io.imread(image_name)
-    print("Rectifying {}".format(image_name))
+    print("Detecting {}".format(image_name))
     save_name = '.'.join(image_name.split('.')[:-1]) + '_warped.png'
     io.imsave(save_name, rectify_image(image_name, 4, algorithm='independent'))
