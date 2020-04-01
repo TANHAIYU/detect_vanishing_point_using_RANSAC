@@ -1,6 +1,7 @@
 from skimage import feature, color, transform, io
 import numpy as np
 import logging
+import cv2
 
 
 def compute_edgelets(image, sigma=3):
@@ -10,9 +11,8 @@ def compute_edgelets(image, sigma=3):
     """
     gray_img = color.rgb2gray(image)
     edges = feature.canny(gray_img, sigma)
-    lines = transform.probabilistic_hough_line(edges, line_length=3,
-                                               line_gap=2)
-
+    lines = transform.probabilistic_hough_line(edges, threshold=10, line_length=50,
+                                               line_gap=10)
     locations = []
     directions = []
     strengths = []
@@ -28,8 +28,7 @@ def compute_edgelets(image, sigma=3):
     directions = np.array(directions)
     strengths = np.array(strengths)
 
-    directions = np.array(directions) / \
-        np.linalg.norm(directions, axis=1)[:, np.newaxis]
+    directions = np.array(directions) / np.linalg.norm(directions, axis=1)[:, np.newaxis]
 
     return (locations, directions, strengths)
 
@@ -53,20 +52,22 @@ def compute_votes(edgelets, model, threshold_inlier=5):
     otherwise zero.
     votes: ndarry of shape (n_edgelets,)  Votes towards vanishing point model for each of the edgelet.
     """
+    # print("model: ",model)
     vp = model[:2] / model[2]
+    # print("vp: ",vp)
 
     locations, directions, strengths = edgelets
 
     est_directions = locations - vp
     dot_prod = np.sum(est_directions * directions, axis=1)
-    abs_prod = np.linalg.norm(directions, axis=1) * \
-        np.linalg.norm(est_directions, axis=1)
+    abs_prod = np.linalg.norm(directions, axis=1) * np.linalg.norm(est_directions, axis=1)
     abs_prod[abs_prod == 0] = 1e-5
 
     cosine_theta = dot_prod / abs_prod
     theta = np.arccos(np.abs(cosine_theta))
 
     theta_thresh = threshold_inlier * np.pi / 180
+    # print((theta < theta_thresh) * strengths)
     return (theta < theta_thresh) * strengths
 
 
@@ -93,8 +94,11 @@ def ransac_vanishing_point(edgelets, num_ransac_iter=2000, threshold_inlier=5):
 
     num_pts = strengths.size
 
+    print("num_pts: ",num_pts)
+
     arg_sort = np.argsort(-strengths)
     first_index_space = arg_sort[:num_pts // 5]
+    print(first_index_space)
     second_index_space = arg_sort[:num_pts // 2]
 
     best_model = None
@@ -103,18 +107,17 @@ def ransac_vanishing_point(edgelets, num_ransac_iter=2000, threshold_inlier=5):
     for ransac_iter in range(num_ransac_iter):
         ind1 = np.random.choice(first_index_space)
         ind2 = np.random.choice(second_index_space)
-
         l1 = lines[ind1]
         l2 = lines[ind2]
 
         current_model = np.cross(l1, l2)
+        # print("current_model: ",current_model)
 
         if np.sum(current_model**2) < 1 or current_model[2] == 0:
             # reject degenerate candidates
             continue
 
-        current_votes = compute_votes(
-            edgelets, current_model, threshold_inlier)
+        current_votes = compute_votes(edgelets, current_model, threshold_inlier)
 
         if current_votes.sum() > best_votes.sum():
             best_model = current_model
@@ -203,36 +206,16 @@ def ransac_3_line(edgelets, focal_length, num_ransac_iter=2000,
     return best_model
 
 
-def reestimate_model(model, edgelets, threshold_reestimate=5):
-    """Reestimate vanishing point using inliers and least squares.
-
-    All the edgelets which are within a threshold are used to reestimate model
-
-    Parameters
-    ----------
-    model: ndarry of shape (3,)
-        Vanishing point model in homogenous coordinates which is to be
-        reestimated.
-    edgelets: tuple of ndarrays
-        (locations, directions, strengths) as computed by `compute_edgelets`.
-        All edgelets from which inliers will be computed.
-    threshold_inlier: float
-        threshold to be used for finding inlier edgelets.
-
-    Returns
-    -------
-    restimated_model: ndarry of shape (3,)
-        Reestimated model for vanishing point in homogenous coordinates.
-    """
+def reestimate_model(model, edgelets, threshold_reestimate=10):
     locations, directions, strengths = edgelets
 
-    inliers = compute_votes(edgelets, model, threshold_reestimate) > 0
+    inliers = compute_votes(edgelets, model, threshold_reestimate)>0
     locations = locations[inliers]
     directions = directions[inliers]
     strengths = strengths[inliers]
 
     lines = edgelet_lines((locations, directions, strengths))
-
+    print('reestimated lines :',lines)
     a = lines[:, :2]
     b = -lines[:, 2]
     est_model = np.linalg.lstsq(a, b)[0]
@@ -240,23 +223,6 @@ def reestimate_model(model, edgelets, threshold_reestimate=5):
 
 
 def remove_inliers(model, edgelets, threshold_inlier=10):
-    """Remove all inlier edglets of a given model.
-
-    Parameters
-    ----------
-    model: ndarry of shape (3,)
-        Vanishing point model in homogenous coordinates which is to be
-        reestimated.
-    edgelets: tuple of ndarrays
-        (locations, directions, strengths) as computed by `compute_edgelets`.
-    threshold_inlier: float
-        threshold to be used for finding inlier edgelets.
-
-    Returns
-    -------
-    edgelets_new: tuple of ndarrays
-        All Edgelets except those which are inliers to model.
-    """
     inliers = compute_votes(edgelets, model, 10) > 0
     locations, directions, strengths = edgelets
     locations = locations[~inliers]
@@ -267,34 +233,6 @@ def remove_inliers(model, edgelets, threshold_inlier=10):
 
 
 def compute_homography_and_warp(image, vp1, vp2, clip=True, clip_factor=3):
-    """Compute homography from vanishing points and warp the image.
-
-    It is assumed that vp1 and vp2 correspond to horizontal and vertical
-    directions, although the order is not assumed.
-    Firstly, projective transform is computed to make the vanishing points go
-    to infinty so that we have a fronto parellel view. Then,Computes affine
-    transfom  to make axes corresponding to vanishing points orthogonal.
-    Finally, Image is translated so that the image is not missed. Note that
-    this image can be very large. `clip` is provided to deal with this.
-
-    Parameters
-    ----------
-    image: ndarray
-        Image which has to be wrapped.
-    vp1: ndarray of shape (3, )
-        First vanishing point in homogenous coordinate system.
-    vp2: ndarray of shape (3, )
-        Second vanishing point in homogenous coordinate system.
-    clip: bool, optional
-        If True, image is clipped to clip_factor.
-    clip_factor: float, optional
-        Proportion of image in multiples of image size to be retained if gone
-        out of bounds after homography.
-    Returns
-    -------
-    warped_img: ndarray
-        Image warped using homography as described above.
-    """
     # Find Projective Transform
     vanishing_line = np.cross(vp1, vp2)
     H = np.eye(3)
@@ -366,6 +304,8 @@ def compute_homography_and_warp(image, vp1, vp2, clip=True, clip_factor=3):
                                 output_shape=(max_y, max_x))
     return warped_img
 
+def extractCameraMatrixByThreeVPs(image,vp1,vp2): # TODO: extract intrinsic parameter from three vanishing points
+
 
 def vis_edgelets(image, edgelets, show=True):
     """Helper function to visualize edgelets."""
@@ -407,7 +347,7 @@ def vis_model(image, model, show=True):
 
 
 def rectify_image(image, clip_factor=6, algorithm='independent', 
-                  reestimate=False):
+                  reestimate=True):
     
     if type(image) is not np.ndarray:
         image = io.imread(image)
@@ -415,23 +355,59 @@ def rectify_image(image, clip_factor=6, algorithm='independent',
     # Compute all edgelets.
     edgelets1 = compute_edgelets(image)
 
+    print("edgelets1: ",edgelets1)
+
     if algorithm == 'independent':
         # Find first vanishing point
-        vp1 = ransac_vanishing_point(edgelets1, 2000, threshold_inlier=5)
+        vp1 = ransac_vanishing_point(edgelets1, 1000, threshold_inlier=5)
+        # visualization of vp1
+        vis_model(image, vp1, show=True)
+
+        print("first estimated vanishing point1: ",vp1)
         if reestimate:
             vp1 = reestimate_model(vp1, edgelets1, 5)
+            # visualization of vp1
+            vis_model(image, vp1, show=True)
+            print("after restimated vp1:",vp1)
+
+        vis_edgelets(image,edgelets1)
 
         # Remove inlier to remove dominating direction.
         edgelets2 = remove_inliers(vp1, edgelets1, 10)
+        # visualization of edgelets2
+        vis_edgelets(image,edgelets2)
 
         # Find second vanishing point
-        vp2 = ransac_vanishing_point(edgelets2, 2000, threshold_inlier=5)
+        vp2 = ransac_vanishing_point(edgelets2, 1000, threshold_inlier=5)
+        vis_model(image, vp2, show=True)
+        print("first estimated vanishing point2: ", vp2)
         if reestimate:
-            vp2 = reestimate_model(vp2, edgelets2, 5)
+            vp2 = reestimate_model(vp2, edgelets2, 10)
+            vis_model(image, vp2, show=True)
+            print("after restimated vp2:", vp2)
+
+        # Remove inlier to remove dominating direction.
+        edgelets3 = remove_inliers(vp2, edgelets2, 10)
+        # visualization of edgelets3
+        vis_edgelets(image,edgelets3)
+
+        # Find second vanishing point
+        vp3 = ransac_vanishing_point(edgelets3, 1000, threshold_inlier=5)
+        vis_model(image, vp3, show=True)
+        print("first estimated vanishing point2: ", vp3)
+        if reestimate:
+            vp3 = reestimate_model(vp3, edgelets3, 5)
+            vis_model(image, vp3, show=True)
+            print("after restimated vp3:", vp3)
+
+
+
     elif algorithm == '3-line':
         focal_length = None
         vp1, vp2 = ransac_3_line(edgelets1, focal_length,
-                                 num_ransac_iter=3000, threshold_inlier=5)
+                                 num_ransac_iter=5000, threshold_inlier=5)
+        print(vp1)
+        print(vp2)
     else:
         raise KeyError(
             "Parameter 'algorithm' has to be one of {'3-line', 'independent'}")
@@ -442,7 +418,10 @@ def rectify_image(image, clip_factor=6, algorithm='independent',
 if __name__ == '__main__':
     import sys
     image_name = sys.argv[-1]
+    print(image_name)
     image = io.imread(image_name)
-    print("Detecting {}".format(image_name))
+    print("Rectifying {}".format(image_name))
     save_name = '.'.join(image_name.split('.')[:-1]) + '_warped.png'
-    io.imsave(save_name, rectify_image(image_name, 4, algorithm='independent'))
+    rectify_image(image_name, 4, algorithm='independent')
+    # rectify_image(image_name, 4, algorithm='3-line')
+    # io.imsave(save_name, rectify_image(image_name, 4, algorithm='independent'))
